@@ -35,7 +35,7 @@ type AccountItemProps = { account: WAAccount; selected: boolean; avatarVersion: 
 
 const collapsedIconButtonClass = 'group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-12! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!';
 const accountButtonClass = 'h-12 gap-2 p-1! group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-12! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-1!';
-const footerButtonClass = 'h-10 group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center';
+const footerButtonClass = 'group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center';
 const collapsedTextClass = 'group-data-[collapsible=icon]:hidden';
 
 export function WaAccountRail({ accounts, selectedID, avatarVersion, connections, loading, connectionsLoading, hasNextPage, loadingMore, onLoadMore }: RailProps) {
@@ -114,14 +114,14 @@ function AccountItem({ account, selected, avatarVersion, connection, loading }: 
 function RailFooter({ selectedID }: { selectedID: string }) {
   return (
     <SidebarMenu>
-      <SidebarMenuItem>{selectedID ? <FooterLink title="账号信息" to={waAccountPath(selectedID)}><Info /></FooterLink> : <SidebarMenuButton size="lg" disabled tooltip="账号信息" aria-label="账号信息" className={footerButtonClass}><Info /><span>账号信息</span></SidebarMenuButton>}</SidebarMenuItem>
+      <SidebarMenuItem>{selectedID ? <FooterLink title="账号信息" to={waAccountPath(selectedID)}><Info /></FooterLink> : <SidebarMenuButton size="lg" disabled tooltip="账号信息" aria-label="账号信息" className={footerButtonClass}><Info /><span className={collapsedTextClass}>账号信息</span></SidebarMenuButton>}</SidebarMenuItem>
       <SidebarMenuItem><FooterLink title="添加账号" to="/accounts/new"><Plus /></FooterLink></SidebarMenuItem>
     </SidebarMenu>
   );
 }
 
 function FooterLink({ children, title, to }: { children: ReactNode; title: string; to: string }) {
-  return <SidebarMenuButton asChild size="lg" tooltip={title} className={footerButtonClass}><Link to={to} title={title} aria-label={title}>{children}<span>{title}</span></Link></SidebarMenuButton>;
+  return <SidebarMenuButton asChild size="lg" tooltip={title} className={footerButtonClass}><Link to={to} title={title} aria-label={title}>{children}<span className={collapsedTextClass}>{title}</span></Link></SidebarMenuButton>;
 }
 
 function LoadMoreButton({ loading, onLoadMore }: { loading: boolean; onLoadMore: () => void }) {
