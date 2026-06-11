@@ -1,10 +1,8 @@
 services:
   # ── wa-app 核心服务 ─────────────────────────────────────────────
   wa-app:
-    image: ghcr.io/pood1e/wa-app-service:${WA_APP_IMAGE_TAG}
+    image: ghcr.io/pood1e/wa-app-service:${WA_APP_IMAGE_TAG:-latest}
     container_name: wa-app
-    env_file:
-      - .env
     environment:
       WA_APP_AUTH_PASSWORD: ${WA_APP_AUTH_PASSWORD:-}
       WA_APP_PG_DSN: ${WA_APP_PG_DSN:-}

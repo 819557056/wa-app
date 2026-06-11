@@ -23,6 +23,8 @@ docker compose pull
 docker compose up -d
 ```
 
+如果你只是本地快速启动，也可以直接 `docker compose up -d`（不创建 `.env` 也能启动，未配置值默认为空/空端口）。
+
 默认端口（固定）：
 
 - Dashboard：`http://127.0.0.1:8080`（`docker-compose.yml` 映射）
