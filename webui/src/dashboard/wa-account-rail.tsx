@@ -75,22 +75,23 @@ function RailHeader({ value, onChange }: { value: string; onChange: (value: stri
 
 function AccountItem({ account, selected, avatarVersion, connection, loading }: AccountItemProps) {
   const id = waAccountID(account);
-  const title = waAccountPhoneLabel(account);
+  const label = waAccountRailLabel(account);
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild size="lg" isActive={selected} tooltip={title} className={railButtonClass}>
-        <NavLink to={waChatsPath(id)} title={title} aria-label={title}>
+      <SidebarMenuButton asChild size="lg" isActive={selected} tooltip={label.tooltip} className={railButtonClass}>
+        <NavLink to={waChatsPath(id)} title={label.tooltip} aria-label={label.tooltip}>
           <span className="relative shrink-0">
             <WaAccountAvatar account={account} version={avatarVersion} size="md" />
             <WaConnectionDot className="absolute bottom-0 right-0" connection={connection} loading={loading} />
           </span>
           <span className={`min-w-0 flex-1 ${collapsedTextClass}`}>
-            <span className="block whitespace-nowrap text-sm font-medium tabular-nums">{title}</span>
+            <span className="block truncate text-sm font-medium">{label.primary}</span>
+            {label.subtitle ? <span className="block truncate font-mono text-xs text-muted-foreground">{label.subtitle}</span> : null}
           </span>
         </NavLink>
       </SidebarMenuButton>
       <SidebarMenuAction asChild showOnHover={!selected} className={accountActionClass}>
-        <Link to={waAccountPath(id)} title="账号详情" aria-label={`${title} 账号详情`}><Info /></Link>
+        <Link to={waAccountPath(id)} title="账号详情" aria-label={`${label.tooltip} 账号详情`}><Info /></Link>
       </SidebarMenuAction>
     </SidebarMenuItem>
   );
@@ -142,8 +143,12 @@ function phoneCallingCode(value: string) {
   return value.startsWith('+') ? value : `+${value}`;
 }
 
-function waAccountPhoneLabel(account: WAAccount) {
-  return waAccountPhone(account) || '未录入手机号';
+function waAccountRailLabel(account: WAAccount) {
+  const name = account.display_name?.trim() || '';
+  const phone = waAccountPhone(account);
+  const primary = name || phone || '未录入手机号';
+  const subtitle = name && phone ? phone : '';
+  return { primary, subtitle, tooltip: subtitle ? `${primary} · ${subtitle}` : primary };
 }
 
 function normalizeQuery(value: string) {
