@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useExternalStoreRuntime, useMessage, type AppendMessage } from '@assistant-ui/react';
-import { Info, Loader2, Send } from 'lucide-react';
-import { Link } from 'react-router';
+import { Loader2, Send } from 'lucide-react';
 import { WhatsAppIcon } from './wa-brand-icon';
 import { WaContactAvatar } from './wa-contact-avatar';
 import { toAssistantMessage, type WaChatEvent, type WaChatMeta, type WaContact } from './wa-chat-model';
@@ -12,12 +11,12 @@ import { Button } from '@/components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 
-export function WaChatThread({ contact, accountInfoURL, events, loading, sending, error, onSendMessage }: { contact?: WaContact; accountInfoURL: string; events: WaChatEvent[]; loading: boolean; sending: boolean; error?: string; onSendMessage: (text: string) => Promise<unknown> }) {
+export function WaChatThread({ contact, events, loading, sending, error, onSendMessage }: { contact?: WaContact; events: WaChatEvent[]; loading: boolean; sending: boolean; error?: string; onSendMessage: (text: string) => Promise<unknown> }) {
   const runtime = useExternalStoreRuntime<WaChatEvent>({ messages: events, convertMessage: toAssistantMessage, isDisabled: true, isLoading: loading, onNew: noopNewMessage });
   const title = contact?.title || '选择联系人';
   return (
     <section className="grid min-h-0 grid-rows-[auto_1fr_auto] overflow-hidden bg-card">
-      <ChatHeader contact={contact} accountInfoURL={accountInfoURL} loading={loading} />
+      <ChatHeader contact={contact} loading={loading} />
       <div className="h-full min-h-0">
         <AssistantRuntimeProvider runtime={runtime}>
           <ThreadPrimitive.Root className="h-full min-h-0">
@@ -33,7 +32,7 @@ export function WaChatThread({ contact, accountInfoURL, events, loading, sending
   );
 }
 
-function ChatHeader({ contact, accountInfoURL, loading }: { contact?: WaContact; accountInfoURL: string; loading: boolean }) {
+function ChatHeader({ contact, loading }: { contact?: WaContact; loading: boolean }) {
   const subtitle = contact?.subtitle || '';
   return (
     <header className="flex h-16 items-center justify-between gap-3 border-b border-border px-5">
@@ -46,7 +45,6 @@ function ChatHeader({ contact, accountInfoURL, loading }: { contact?: WaContact;
       </div>
       <div className="flex items-center gap-2">
         {loading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-        <Button asChild size="icon" variant="ghost" title="账号信息" aria-label="账号信息"><Link to={accountInfoURL}><Info size={16} /></Link></Button>
       </div>
     </header>
   );

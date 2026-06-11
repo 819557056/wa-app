@@ -88,8 +88,8 @@ function AccountItem({ account, selected, avatarVersion, connection, loading }: 
           </span>
         </NavLink>
       </SidebarMenuButton>
-      <SidebarMenuAction asChild showOnHover>
-        <Link to={waAccountPath(id)} title="账号信息" aria-label="账号信息"><Info /></Link>
+      <SidebarMenuAction asChild showOnHover={!selected}>
+        <Link to={waAccountPath(id)} title="账号详情" aria-label={`${title} 账号详情`}><Info /></Link>
       </SidebarMenuAction>
     </SidebarMenuItem>
   );
