@@ -365,6 +365,14 @@ func (p orderedParams) rawKeys() []string {
 	return out
 }
 
+func (p orderedParams) toMap() map[string]string {
+	out := make(map[string]string, len(p))
+	for _, item := range p {
+		out[item.key] = item.val
+	}
+	return out
+}
+
 func (p orderedParams) render() string {
 	parts := make([]string, 0, len(p))
 	for _, item := range p {

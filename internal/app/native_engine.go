@@ -140,17 +140,17 @@ func (e *NativeEngine) requestVerificationCodeWithState(ctx context.Context, inp
 	if err := ensureNativeSoftwareAttestation(&state); err != nil {
 		return EngineCodeResult{Status: waappv1.VerificationRequestStatus_VERIFICATION_REQUEST_STATUS_REJECTED, Err: err}, state
 	}
-	params, rawKeys := e.codeParams(input.Phone, input.DeliveryMethod, state, input.AuthCodeContext)
-	if err := e.applyRuntimeWamsys(ctx, waappv1.RegistrationRequestKind_REGISTRATION_REQUEST_KIND_CODE, input.Phone, state, params, rawKeys); err != nil {
+	params, err := e.codeRequestOrderedParams(ctx, input.Phone, input.DeliveryMethod, state, input.AuthCodeContext)
+	if err != nil {
 		return EngineCodeResult{Status: waappv1.VerificationRequestStatus_VERIFICATION_REQUEST_STATUS_REJECTED, Err: err}, state
 	}
-	plain := renderNativePlain(params, rawKeys)
+	plain := params.render()
 	client, err := e.httpForProxy()
 	if err != nil {
 		return EngineCodeResult{Status: waappv1.VerificationRequestStatus_VERIFICATION_REQUEST_STATUS_REJECTED, Err: err}, state
 	}
 	data, enc, err := client.postWASafe(ctx, defaultWACodeURL, plain, nativeUserAgentForState(state, input.AppVersion), state.Attestation)
-	state.LastCodeParams = params
+	state.LastCodeParams = params.toMap()
 	state.LastCodeResult = sanitizeResponse(data)
 	if enc != "" {
 		state.LastCodeResult["enc_sha256"] = encHash(enc)
@@ -626,6 +626,7 @@ func (e *NativeEngine) codeParams(phone *waappv1.PhoneTarget, method waappv1.Ver
 		"expid":             state.Profile.ExpID,
 		"access_session_id": state.Profile.AccessSessionID,
 		"id":                state.Profile.ID,
+		"backup_token":      state.Profile.BackupToken,
 		"authkey":           state.AuthKey,
 		"e_ident":           state.KeyBundle.IdentityPublic,
 		"e_keytype":         state.KeyBundle.KeyType,
@@ -643,7 +644,9 @@ func (e *NativeEngine) codeParams(phone *waappv1.PhoneTarget, method waappv1.Ver
 	if advertisingID := nativeAdvertisingID(state); advertisingID != "" && shouldSendNativeAdvertisingID(phone) {
 		params["advertising_id"] = advertisingID
 	}
-	return params, map[string]struct{}{"id": {}}
+	raw := map[string]struct{}{"id": {}, "backup_token": {}}
+	applyNativeRawParamMap(params, raw, codeDeviceMap(methodName, state), true)
+	return params, raw
 }
 
 func omitEmptyNativeOperatorField(key string, value string) bool {

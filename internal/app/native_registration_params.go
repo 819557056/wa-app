@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
@@ -45,6 +46,89 @@ func (e *NativeEngine) registrationToken(phone *waappv1.PhoneTarget, state nativ
 		return token
 	}
 	return state.LastCodeParams["token"]
+}
+
+func (e *NativeEngine) codeRequestOrderedParams(ctx context.Context, phone *waappv1.PhoneTarget, method waappv1.VerificationDeliveryMethod, state nativeState, authCodeContext string) (orderedParams, error) {
+	methodName := registrationMethodName(method, "sms")
+	fields := nativeDeviceMapFields(state)
+	params := orderedParams{}
+	params.set("cc", phoneCC(phone), false)
+	params.set("in", phoneNational(phone), false)
+	params.set("lg", "en", false)
+	params.set("lc", "US", false)
+	params.set("fdid", state.Profile.FDID, false)
+	params.set("expid", state.Profile.ExpID, false)
+	if state.Profile.AccessSessionID != "" {
+		params.set("access_session_id", state.Profile.AccessSessionID, false)
+	}
+	params.set("id", state.Profile.ID, true)
+	params.set("backup_token", state.Profile.BackupToken, true)
+	if token := e.registrationToken(phone, state); token != "" {
+		params.set("token", token, false)
+	}
+	params.set("method", methodName, false)
+	if contextValue := strings.TrimSpace(authCodeContext); contextValue != "" {
+		params.set("context", contextValue, false)
+	}
+	if advertisingID := nativeAdvertisingID(state); advertisingID != "" && shouldSendNativeAdvertisingID(phone) {
+		params.set("advertising_id", advertisingID, false)
+	}
+	applyNativeE2EParams(&params, state)
+	applyNativeCodeRequestMapParams(&params, fields)
+	capture, err := e.wamsysProvider().RegistrationMaterial(ctx, wamsysMaterialInput{Kind: waappv1.RegistrationRequestKind_REGISTRATION_REQUEST_KIND_CODE, Phone: phone, State: state})
+	if err != nil {
+		return nil, err
+	}
+	applyOrderedWamsysKey(&params, capture, "gpia")
+	addOptionalRawParam(&params, "db", fields["db"])
+	addOptionalRawParam(&params, "recaptcha", fields["recaptcha"])
+	applyOrderedWamsysExcept(&params, capture, map[string]struct{}{"gpia": {}})
+	addOptionalRawParam(&params, "feo2_query_status", fields["feo2_query_status"])
+	return params, nil
+}
+
+func applyNativeE2EParams(params *orderedParams, state nativeState) {
+	params.set("authkey", state.AuthKey, false)
+	params.set("e_ident", state.KeyBundle.IdentityPublic, false)
+	params.set("e_keytype", state.KeyBundle.KeyType, false)
+	params.set("e_regid", state.KeyBundle.RegID, false)
+	params.set("e_skey_id", state.KeyBundle.SignedKeyID, false)
+	params.set("e_skey_val", state.KeyBundle.SignedKeyValue, false)
+	params.set("e_skey_sig", state.KeyBundle.SignedKeySig, false)
+}
+
+func applyNativeCodeRequestMapParams(params *orderedParams, fields map[string]string) {
+	addOptionalRawParam(params, "mistyped", fields["mistyped"])
+	addRawParam(params, "reason", "")
+	addOptionalRawParam(params, "hasav", fields["hasav"])
+	addRawParam(params, "client_metrics", nativeCodeClientMetrics())
+	addOptionalRawParam(params, "mcc", fields["mcc"])
+	addOptionalRawParam(params, "mnc", fields["mnc"])
+	addOptionalRawParam(params, "sim_mcc", fields["sim_mcc"])
+	addOptionalRawParam(params, "sim_mnc", fields["sim_mnc"])
+	addRawParam(params, "education_screen_displayed", "false")
+	addRawParam(params, "prefer_sms_over_flash", firstNonEmpty(fields["prefer_sms_over_flash"], "false"))
+	addOptionalRawParam(params, "network_radio_type", fields["network_radio_type"])
+	addOptionalRawParam(params, "simnum", fields["simnum"])
+	addOptionalRawParam(params, "hasinrc", fields["hasinrc"])
+	addOptionalRawParam(params, "pid", fields["pid"])
+	addOptionalRawParam(params, "rc", fields["rc"])
+	addOptionalRawParam(params, "sim_type", fields["sim_type"])
+	addOptionalRawParam(params, "airplane_mode_type", fields["airplane_mode_type"])
+	addOptionalRawParam(params, "cellular_strength", fields["cellular_strength"])
+	addOptionalRawParam(params, "roaming_type", fields["roaming_type"])
+	addOptionalRawParam(params, "device_ram", fields["device_ram"])
+}
+
+func addOptionalRawParam(params *orderedParams, key string, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	addRawParam(params, key, value)
+}
+
+func addRawParam(params *orderedParams, key string, value string) {
+	params.set(key, pctBytes([]byte(value)), true)
 }
 
 func registrationMethodName(method waappv1.VerificationDeliveryMethod, fallback string) string {
@@ -150,9 +234,6 @@ func codeDeviceMap(method string, state nativeState) map[string]string {
 	out := map[string]string{
 		"reason":                     "",
 		"client_metrics":             nativeCodeClientMetrics(),
-		"clicked_education_link":     "false",
-		"manage_call_permission":     "false",
-		"call_log_permission":        "false",
 		"education_screen_displayed": "false",
 		"prefer_sms_over_flash":      nativePreferSMSOverFlash(state),
 		"network_radio_type":         fields["network_radio_type"],
