@@ -10,8 +10,10 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 )
 
@@ -27,6 +29,18 @@ type nativeSoftwareAttestation struct {
 }
 
 var androidKeyAttestationOID = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 11129, 2, 1, 17}
+var nativeAttestationPaddingOID = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 11129, 2, 1, 777}
+
+const (
+	nativeAttestationRootDERLength         = 1312
+	nativeAttestationFirstIntermediateDER  = 920
+	nativeAttestationSecondIntermediateDER = 505
+	nativeAttestationLeafDERLength         = 685
+	nativeAttestationChainDERLength        = nativeAttestationRootDERLength +
+		nativeAttestationFirstIntermediateDER +
+		nativeAttestationSecondIntermediateDER +
+		nativeAttestationLeafDERLength
+)
 
 func buildWASafeEnvelope(plain []byte, serverPublicKeyHex string, attestation nativeSoftwareAttestation) (waSafeEnvelope, error) {
 	enc, err := encryptWASafe(plain, serverPublicKeyHex)
@@ -45,6 +59,21 @@ func buildWASafeEnvelope(plain []byte, serverPublicKeyHex string, attestation na
 }
 
 func ensureNativeSoftwareAttestation(state *nativeState) error {
+	if state == nil {
+		return nil
+	}
+	if state.Attestation.ready() && nativeAttestationChainShapeOK(state.Attestation.CertificateChainDER) {
+		return nil
+	}
+	challenge, err := nativeAttestationChallenge(*state)
+	if err != nil {
+		return err
+	}
+	attestation, err := newNativeSoftwareAttestation(challenge, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	state.Attestation = attestation
 	return nil
 }
 
@@ -82,7 +111,23 @@ func newNativeSoftwareAttestationCertificateChain(privateKey *ecdsa.PrivateKey, 
 	if err != nil {
 		return nil, err
 	}
+	firstIntermediateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	secondIntermediateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
 	rootSerial, err := nativeAttestationSerial()
+	if err != nil {
+		return nil, err
+	}
+	firstIntermediateSerial, err := nativeAttestationSerial()
+	if err != nil {
+		return nil, err
+	}
+	secondIntermediateSerial, err := nativeAttestationSerial()
 	if err != nil {
 		return nil, err
 	}
@@ -96,38 +141,114 @@ func newNativeSoftwareAttestationCertificateChain(privateKey *ecdsa.PrivateKey, 
 	}
 	root := &x509.Certificate{
 		SerialNumber:          rootSerial,
-		Subject:               pkix.Name{CommonName: "Android Keystore Attestation Root"},
+		Subject:               pkix.Name{SerialNumber: nativeAttestationSubjectSerial()},
 		NotBefore:             now.Add(-time.Minute),
 		NotAfter:              now.Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
+		MaxPathLen:            2,
 	}
-	rootDER, err := x509.CreateCertificate(rand.Reader, root, root, &rootKey.PublicKey, rootKey)
+	rootDER, err := createNativePaddedAttestationCertificate(root, root, &rootKey.PublicKey, rootKey, nil, nativeAttestationRootDERLength)
+	if err != nil {
+		return nil, err
+	}
+	firstIntermediate := &x509.Certificate{
+		SerialNumber: firstIntermediateSerial,
+		Subject: pkix.Name{
+			SerialNumber:       nativeAttestationSubjectSerial(),
+			OrganizationalUnit: []string{"TEE"},
+		},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            1,
+	}
+	firstIntermediateDER, err := createNativePaddedAttestationCertificate(firstIntermediate, root, &firstIntermediateKey.PublicKey, rootKey, nil, nativeAttestationFirstIntermediateDER)
+	if err != nil {
+		return nil, err
+	}
+	secondIntermediate := &x509.Certificate{
+		SerialNumber: secondIntermediateSerial,
+		Subject: pkix.Name{
+			SerialNumber:       nativeAttestationSubjectSerial(),
+			OrganizationalUnit: []string{"TEE"},
+		},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            0,
+	}
+	secondIntermediateDER, err := createNativePaddedAttestationCertificate(secondIntermediate, firstIntermediate, &secondIntermediateKey.PublicKey, firstIntermediateKey, nil, nativeAttestationSecondIntermediateDER)
 	if err != nil {
 		return nil, err
 	}
 	leaf := &x509.Certificate{
-		SerialNumber: leafSerial,
-		Subject:      pkix.Name{CommonName: "Android Keystore Software Attestation"},
-		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(365 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtraExtensions: []pkix.Extension{{
-			Id:    androidKeyAttestationOID,
-			Value: extension,
-		}},
+		SerialNumber:          leafSerial,
+		Subject:               pkix.Name{CommonName: "Android Keystore Key"},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, root, &privateKey.PublicKey, rootKey)
+	leafDER, err := createNativePaddedAttestationCertificate(leaf, secondIntermediate, &privateKey.PublicKey, secondIntermediateKey, []pkix.Extension{{
+		Id:    androidKeyAttestationOID,
+		Value: extension,
+	}}, nativeAttestationLeafDERLength)
 	if err != nil {
 		return nil, err
 	}
-	return append(append([]byte{}, rootDER...), leafDER...), nil
+	chain := make([]byte, 0, nativeAttestationChainDERLength)
+	chain = append(chain, rootDER...)
+	chain = append(chain, firstIntermediateDER...)
+	chain = append(chain, secondIntermediateDER...)
+	chain = append(chain, leafDER...)
+	return chain, nil
+}
+
+func createNativePaddedAttestationCertificate(
+	template *x509.Certificate,
+	parent *x509.Certificate,
+	publicKey any,
+	signer any,
+	baseExtensions []pkix.Extension,
+	targetLength int,
+) ([]byte, error) {
+	paddingLength := 0
+	var best []byte
+	for attempt := 0; attempt < 24; attempt++ {
+		certificate := *template
+		certificate.ExtraExtensions = append([]pkix.Extension{}, baseExtensions...)
+		if paddingLength > 0 {
+			certificate.ExtraExtensions = append(certificate.ExtraExtensions, pkix.Extension{Id: nativeAttestationPaddingOID, Value: randomBytes(paddingLength)})
+		}
+		der, err := x509.CreateCertificate(rand.Reader, &certificate, parent, publicKey, signer)
+		if err != nil {
+			return nil, err
+		}
+		best = der
+		diff := targetLength - len(der)
+		if diff == 0 {
+			return der, nil
+		}
+		paddingLength += diff
+		if paddingLength < 0 {
+			paddingLength = 0
+		}
+	}
+	return best, nil
 }
 
 func nativeAttestationSerial() (*big.Int, error) {
 	return rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+}
+
+func nativeAttestationSubjectSerial() string {
+	return hex.EncodeToString(randomBytes(16))
 }
 
 func nativeAndroidKeyAttestationChallenge(clientStaticPublic []byte, now time.Time) []byte {
@@ -156,9 +277,9 @@ func nativeSoftwareAndroidKeyAttestationExtension(challenge []byte) ([]byte, err
 	emptyAuthorizationList := asn1.RawValue{FullBytes: []byte{0x30, 0x00}}
 	return asn1.Marshal(nativeSoftwareAndroidKeyDescription{
 		AttestationVersion:       3,
-		AttestationSecurityLevel: 0,
+		AttestationSecurityLevel: 1,
 		KeymasterVersion:         4,
-		KeymasterSecurityLevel:   0,
+		KeymasterSecurityLevel:   1,
 		AttestationChallenge:     append([]byte{}, challenge...),
 		UniqueID:                 []byte{},
 		SoftwareEnforced:         emptyAuthorizationList,
@@ -181,6 +302,24 @@ func (a nativeSoftwareAttestation) ready() bool {
 	return certificates[0].IsCA
 }
 
+func nativeAttestationChainShapeOK(certificateChain string) bool {
+	certificateDER, err := decodeB64Any(certificateChain)
+	if err != nil {
+		return false
+	}
+	if len(certificateDER) < nativeAttestationChainDERLength-16 || len(certificateDER) > nativeAttestationChainDERLength+16 {
+		return false
+	}
+	certificates, err := x509.ParseCertificates(certificateDER)
+	if err != nil || len(certificates) != 4 {
+		return false
+	}
+	if !certificates[0].IsCA || !certificates[1].IsCA || !certificates[2].IsCA || certificates[3].IsCA {
+		return false
+	}
+	return strings.EqualFold(certificates[3].Subject.CommonName, "Android Keystore Key")
+}
+
 func (a nativeSoftwareAttestation) sign(body []byte) (string, string, error) {
 	privateKeyDER, err := decodeB64Any(a.PrivateKeyPKCS8)
 	if err != nil {
@@ -195,9 +334,16 @@ func (a nativeSoftwareAttestation) sign(body []byte) (string, string, error) {
 		return "", "", fmt.Errorf("native software attestation key is not ECDSA")
 	}
 	digest := sha256.Sum256(body)
-	signature, err := ecdsa.SignASN1(rand.Reader, privateKey, digest[:])
-	if err != nil {
-		return "", "", err
+	var signature []byte
+	for attempt := 0; attempt < 8; attempt++ {
+		candidate, err := ecdsa.SignASN1(rand.Reader, privateKey, digest[:])
+		if err != nil {
+			return "", "", err
+		}
+		signature = candidate
+		if len(base64.RawURLEncoding.EncodeToString(candidate)) == 96 {
+			break
+		}
 	}
 	certificateDER, err := decodeB64Any(a.CertificateChainDER)
 	if err != nil {
